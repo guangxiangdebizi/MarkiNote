@@ -1,0 +1,28 @@
+# 敏感配置文件 - 含 API Key / Token，绝不提交
+mcp.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# 运行时数据
+.ai_conversations/
+.ai_backups/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
