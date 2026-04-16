@@ -1,6 +1,12 @@
 """AI 工具定义与执行逻辑"""
 import os
 import json
+import sys
+
+# 确保项目根目录在 sys.path 中，以便 import mcp 模块
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 TOOL_DEFINITIONS = [
     {
@@ -767,3 +773,27 @@ def _web_search_ddg(query, proxy=None):
         return output
     except Exception:
         return None
+
+
+# ------------------------------------------------------------------ #
+#  MCP 工具集成
+# ------------------------------------------------------------------ #
+
+def get_all_tool_definitions() -> list[dict]:
+    """返回内置工具 + 所有 MCP 工具的合并列表，供 AI API 调用。"""
+    try:
+        from mcp.mcp_manager import mcp_manager
+        mcp_tools = mcp_manager.get_tool_definitions()
+        return TOOL_DEFINITIONS + mcp_tools
+    except Exception:
+        return TOOL_DEFINITIONS
+
+
+def execute_mcp_tool(tool_name: str, arguments: dict) -> tuple[str, None]:
+    """执行 MCP 工具，返回 (result_text, None)。"""
+    try:
+        from mcp.mcp_manager import mcp_manager
+        result = mcp_manager.call_tool(tool_name, arguments)
+        return result, None
+    except Exception as e:
+        return f'[MCP] 执行失败: {str(e)}', None
