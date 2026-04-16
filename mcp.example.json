@@ -1,0 +1,50 @@
+{
+  "_comment": "复制此文件并重命名为 mcp.json，填入你的配置后即可使用。mcp.json 已加入 .gitignore，不会被提交。",
+
+  "mcpServers": {
+
+    "finance-mcp-http": {
+      "description": "FinanceMCP 金融数据服务 - 推荐方式（Streamable HTTP，需要 Tushare Token）",
+      "type": "streamableHttp",
+      "url": "https://finvestai.top/mcp",
+      "headers": {
+        "X-Tushare-Token": "YOUR_TUSHARE_TOKEN_HERE"
+      },
+      "enabled": true,
+      "timeout": 60
+    },
+
+    "finance-mcp-free": {
+      "description": "FinanceMCP 免费公共服务（SSE 协议，无需 Token，有速率限制）",
+      "type": "sse",
+      "url": "http://106.14.205.176:3101/sse",
+      "headers": {},
+      "enabled": false,
+      "timeout": 60
+    },
+
+    "local-stdio-example": {
+      "description": "本地 Stdio 类型示例 - 通过 npx 启动本地 MCP 包",
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "your-mcp-package-name"],
+      "env": {
+        "API_KEY": "YOUR_API_KEY_HERE"
+      },
+      "enabled": false,
+      "timeout": 60
+    },
+
+    "remote-http-example": {
+      "description": "远程 Streamable HTTP 类型示例 - 自建或第三方 MCP 服务",
+      "type": "streamableHttp",
+      "url": "https://your-mcp-server.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      },
+      "enabled": false,
+      "timeout": 60
+    }
+
+  }
+}
