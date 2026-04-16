@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from flask import Blueprint, Response, request, jsonify, current_app
 from app.utils.ai_provider import stream_chat_completion, get_providers_info, validate_api_key
-from app.utils.ai_tools import TOOL_DEFINITIONS, SYSTEM_PROMPT, execute_tool, get_system_prompt
+from app.utils.ai_tools import TOOL_DEFINITIONS, SYSTEM_PROMPT, execute_tool, get_system_prompt, get_all_tool_definitions, execute_mcp_tool
 from app.utils.ai_backup import BackupManager
 import requests as http_requests
 
@@ -252,12 +252,14 @@ def chat():
         if messages_for_api and messages_for_api[0]['role'] == 'system':
             messages_for_api[0]['content'] = get_system_prompt(language)
 
+        all_tool_defs = get_all_tool_definitions()
+
         for iteration in range(MAX_TOOL_ITERATIONS):
             assistant_content = ''
             tool_calls_map = {}
 
             for event in stream_chat_completion(
-                messages_for_api, TOOL_DEFINITIONS, api_key, provider_id, model_id
+                messages_for_api, all_tool_defs, api_key, provider_id, model_id
             ):
                 etype = event['type']
                 if etype == 'content':
@@ -310,16 +312,24 @@ def chat():
                 except json.JSONDecodeError:
                     fn_args = {}
 
-                result, backup_info = execute_tool(
-                    fn_name, fn_args, lib_dir, bm, backup_group_id,
-                    api_key=api_key, provider_id=provider_id, model_id=model_id
-                )
+                if fn_name.startswith('mcp__'):
+                    result, backup_info = execute_mcp_tool(fn_name, fn_args)
+                    # MCP 工具不截断，保留完整数据
+                    display_result = result
+                    context_result = result
+                else:
+                    result, backup_info = execute_tool(
+                        fn_name, fn_args, lib_dir, bm, backup_group_id,
+                        api_key=api_key, provider_id=provider_id, model_id=model_id
+                    )
+                    display_result = result[:3000]
+                    context_result = result[:5000]
 
                 yield _sse_event('tool_result', {
                     'call_id': tc['id'],
                     'name': fn_name,
                     'args': fn_args,
-                    'result': result[:3000],
+                    'result': display_result,
                     'backup_info': backup_info,
                     'backup_group_id': backup_group_id
                 })
@@ -327,7 +337,7 @@ def chat():
                 tool_msg = {
                     'role': 'tool',
                     'tool_call_id': tc['id'],
-                    'content': result[:5000],
+                    'content': context_result,
                     '_tool_meta': {
                         'name': fn_name,
                         'args': fn_args,
@@ -339,7 +349,7 @@ def chat():
                 messages_for_api.append({
                     'role': 'tool',
                     'tool_call_id': tc['id'],
-                    'content': result[:5000]
+                    'content': context_result
                 })
 
             _save_conversation(conv)
@@ -472,3 +482,26 @@ def list_backups():
     bm = _get_backup_manager()
     backups = bm.list_backups()
     return jsonify({'success': True, 'backups': backups})
+
+
+@ai_bp.route('/api/ai/mcp/servers', methods=['GET'])
+def get_mcp_servers():
+    """返回所有 MCP Server 的状态和工具列表。"""
+    try:
+        from mcp.mcp_manager import mcp_manager
+        servers = mcp_manager.get_servers_status()
+        return jsonify({'success': True, 'servers': servers})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'servers': []})
+
+
+@ai_bp.route('/api/ai/mcp/reload', methods=['POST'])
+def reload_mcp():
+    """重新加载 mcp.json 配置（热更新）。"""
+    try:
+        from mcp.mcp_manager import mcp_manager
+        mcp_manager.reload()
+        servers = mcp_manager.get_servers_status()
+        return jsonify({'success': True, 'servers': servers})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
