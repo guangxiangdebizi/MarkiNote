@@ -3,9 +3,20 @@ from flask import Blueprint, jsonify, current_app, request
 from datetime import datetime
 import os
 import shutil
+from app.auth import active_library_dir, current_user, login_required_response, require_login
 from app.utils import allowed_file, safe_filename
 
 library_bp = Blueprint('library', __name__)
+
+
+def safe_library_path(base_path, *parts):
+    """Resolve a path and keep it inside the active library directory."""
+    base_abs = os.path.abspath(base_path)
+    full_path = os.path.abspath(os.path.join(base_path, *[p for p in parts if p]))
+    if full_path != base_abs and not full_path.startswith(base_abs + os.sep):
+        return None
+    return full_path
+
 
 def get_library_structure(base_path, current_path=''):
     """获取Library目录结构（优化版，使用scandir提高性能）
@@ -17,7 +28,9 @@ def get_library_structure(base_path, current_path=''):
     Returns:
         包含文件和文件夹信息的字典
     """
-    full_path = os.path.join(base_path, current_path) if current_path else base_path
+    full_path = safe_library_path(base_path, current_path)
+    if not full_path:
+        return {'error': '非法路径'}
     items = []
     
     try:
@@ -72,10 +85,12 @@ def list_library():
     start_time = time.time()
     
     current_path = request.args.get('path', '')
-    base_path = current_app.config['LIBRARY_FOLDER']
+    base_path = active_library_dir(require_login=False)
     
     scan_start = time.time()
     items = get_library_structure(base_path, current_path)
+    if isinstance(items, dict) and items.get('error'):
+        return jsonify({'error': items['error']}), 403
     scan_time = (time.time() - scan_start) * 1000  # 转换为毫秒
     
     total_time = (time.time() - start_time) * 1000
@@ -89,6 +104,7 @@ def list_library():
     })
 
 @library_bp.route('/api/library/upload', methods=['POST'])
+@require_login
 def upload_to_library():
     """上传文件到Library"""
     if 'file' not in request.files:
@@ -104,8 +120,10 @@ def upload_to_library():
         filename = safe_filename(file.filename)
         
         # 构建保存路径
-        base_path = current_app.config['LIBRARY_FOLDER']
-        save_dir = os.path.join(base_path, target_path) if target_path else base_path
+        base_path = active_library_dir(require_login=True)
+        save_dir = safe_library_path(base_path, target_path)
+        if not save_dir:
+            return jsonify({'error': '非法路径'}), 403
         
         # 确保目录存在
         os.makedirs(save_dir, exist_ok=True)
@@ -130,6 +148,7 @@ def upload_to_library():
     return jsonify({'error': '不支持的文件格式'}), 400
 
 @library_bp.route('/api/library/create-folder', methods=['POST'])
+@require_login
 def create_folder():
     """创建新文件夹"""
     data = request.get_json()
@@ -142,8 +161,10 @@ def create_folder():
     # 安全处理文件夹名称
     folder_name = safe_filename(folder_name)
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    folder_path = os.path.join(base_path, parent_path, folder_name) if parent_path else os.path.join(base_path, folder_name)
+    base_path = active_library_dir(require_login=True)
+    folder_path = safe_library_path(base_path, parent_path, folder_name)
+    if not folder_path:
+        return jsonify({'error': '非法路径'}), 403
     
     try:
         if os.path.exists(folder_path):
@@ -160,6 +181,7 @@ def create_folder():
         return jsonify({'error': f'创建文件夹失败: {str(e)}'}), 500
 
 @library_bp.route('/api/library/delete', methods=['POST'])
+@require_login
 def delete_item():
     """删除文件或文件夹"""
     data = request.get_json()
@@ -168,11 +190,11 @@ def delete_item():
     if not item_path:
         return jsonify({'error': '路径不能为空'}), 400
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    full_path = os.path.join(base_path, item_path)
-    
+    base_path = active_library_dir(require_login=True)
+    full_path = safe_library_path(base_path, item_path)
+
     # 安全检查：确保路径在Library目录内
-    if not os.path.abspath(full_path).startswith(os.path.abspath(base_path)):
+    if not full_path:
         return jsonify({'error': '非法路径'}), 403
     
     try:
@@ -188,6 +210,7 @@ def delete_item():
         return jsonify({'error': f'删除失败: {str(e)}'}), 500
 
 @library_bp.route('/api/library/move', methods=['POST'])
+@require_login
 def move_item():
     """移动文件到文件夹"""
     data = request.get_json()
@@ -197,14 +220,14 @@ def move_item():
     if not source_path:
         return jsonify({'error': '源路径不能为空'}), 400
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    source_full = os.path.join(base_path, source_path)
-    target_full = os.path.join(base_path, target_path) if target_path else base_path
-    
+    base_path = active_library_dir(require_login=True)
+    source_full = safe_library_path(base_path, source_path)
+    target_full = safe_library_path(base_path, target_path)
+
     # 安全检查
-    if not os.path.abspath(source_full).startswith(os.path.abspath(base_path)):
+    if not source_full:
         return jsonify({'error': '非法源路径'}), 403
-    if not os.path.abspath(target_full).startswith(os.path.abspath(base_path)):
+    if not target_full:
         return jsonify({'error': '非法目标路径'}), 403
     
     try:
@@ -246,11 +269,11 @@ def read_file():
     if not file_path:
         return jsonify({'error': '文件路径不能为空'}), 400
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    full_path = os.path.join(base_path, file_path)
-    
+    base_path = active_library_dir(require_login=False)
+    full_path = safe_library_path(base_path, file_path)
+
     # 安全检查
-    if not os.path.abspath(full_path).startswith(os.path.abspath(base_path)):
+    if not full_path:
         return jsonify({'error': '非法路径'}), 403
     
     try:
@@ -271,7 +294,9 @@ def read_file():
 @library_bp.route('/api/library/folders', methods=['GET'])
 def get_all_folders():
     """获取所有文件夹列表（用于移动文件时选择目标文件夹）"""
-    base_path = current_app.config['LIBRARY_FOLDER']
+    base_path = active_library_dir(require_login=True)
+    if not base_path:
+        return login_required_response()
     
     def get_folders_recursive(path, prefix=''):
         """递归获取所有文件夹"""
@@ -317,6 +342,7 @@ def get_all_folders():
         return jsonify({'error': f'获取文件夹列表失败: {str(e)}'}), 500
 
 @library_bp.route('/api/library/rename', methods=['POST'])
+@require_login
 def rename_item():
     """重命名文件或文件夹"""
     data = request.get_json()
@@ -332,11 +358,11 @@ def rename_item():
     # 安全处理新名称
     new_name = safe_filename(new_name)
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    old_full_path = os.path.join(base_path, old_path)
-    
+    base_path = active_library_dir(require_login=True)
+    old_full_path = safe_library_path(base_path, old_path)
+
     # 安全检查：确保原路径在Library目录内
-    if not os.path.abspath(old_full_path).startswith(os.path.abspath(base_path)):
+    if not old_full_path:
         return jsonify({'error': '非法路径'}), 403
     
     try:
@@ -372,6 +398,7 @@ def rename_item():
         return jsonify({'error': f'重命名失败: {str(e)}'}), 500
 
 @library_bp.route('/api/library/save', methods=['POST'])
+@require_login
 def save_file():
     """保存文件内容"""
     data = request.get_json()
@@ -381,11 +408,11 @@ def save_file():
     if not file_path:
         return jsonify({'error': '文件路径不能为空'}), 400
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    full_path = os.path.join(base_path, file_path)
-    
+    base_path = active_library_dir(require_login=True)
+    full_path = safe_library_path(base_path, file_path)
+
     # 安全检查：确保路径在Library目录内
-    if not os.path.abspath(full_path).startswith(os.path.abspath(base_path)):
+    if not full_path:
         return jsonify({'error': '非法路径'}), 403
     
     try:
@@ -413,11 +440,13 @@ def save_file():
 @library_bp.route('/api/library/check-updates', methods=['GET'])
 def check_updates():
     """返回目录和文件的最新修改时间，供前端轮询检测变更"""
-    lib_dir = current_app.config['LIBRARY_FOLDER']
+    lib_dir = active_library_dir(require_login=False)
     rel_path = request.args.get('path', '')
     file_path = request.args.get('file', '')
 
-    full_dir = os.path.join(lib_dir, rel_path) if rel_path else lib_dir
+    full_dir = safe_library_path(lib_dir, rel_path)
+    if not full_dir:
+        return jsonify({'dir_mtime': 0, 'file_mtime': 0})
     dir_mtime = 0.0
     file_mtime = 0.0
 
@@ -435,8 +464,8 @@ def check_updates():
             pass
 
     if file_path:
-        full_file = os.path.join(lib_dir, file_path)
-        if not os.path.abspath(full_file).startswith(os.path.abspath(lib_dir)):
+        full_file = safe_library_path(lib_dir, file_path)
+        if not full_file:
             return jsonify({'dir_mtime': dir_mtime, 'file_mtime': 0})
         if os.path.isfile(full_file):
             try:
@@ -448,6 +477,7 @@ def check_updates():
 
 
 @library_bp.route('/api/library/create-file', methods=['POST'])
+@require_login
 def create_file():
     """创建新文件"""
     data = request.get_json()
@@ -465,8 +495,10 @@ def create_file():
     # 安全处理文件名
     file_name = safe_filename(file_name)
     
-    base_path = current_app.config['LIBRARY_FOLDER']
-    file_path = os.path.join(base_path, parent_path, file_name) if parent_path else os.path.join(base_path, file_name)
+    base_path = active_library_dir(require_login=True)
+    file_path = safe_library_path(base_path, parent_path, file_name)
+    if not file_path:
+        return jsonify({'error': '非法路径'}), 403
     
     try:
         # 检查文件是否已存在

@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import datetime
 from flask import Blueprint, Response, request, jsonify, current_app
+from app.auth import active_library_dir, backups_dir, conversations_dir, login_required_response, require_login
 from app.utils.ai_provider import stream_chat_completion, get_providers_info, validate_api_key
 from app.utils.ai_tools import TOOL_DEFINITIONS, SYSTEM_PROMPT, execute_tool, get_system_prompt, get_all_tool_definitions, execute_mcp_tool
 from app.utils.ai_backup import BackupManager
@@ -16,18 +17,35 @@ BACKUPS_DIR = '.ai_backups'
 MAX_TOOL_ITERATIONS = 15
 
 
+def _safe_library_path(base_path, rel_path):
+    base_abs = os.path.abspath(base_path)
+    full_path = os.path.abspath(os.path.join(base_path, rel_path or ''))
+    if full_path != base_abs and not full_path.startswith(base_abs + os.sep):
+        return None
+    return full_path
+
+
 def _get_backup_manager():
-    lib_dir = current_app.config['LIBRARY_FOLDER']
-    return BackupManager(BACKUPS_DIR, lib_dir)
+    lib_dir = active_library_dir(require_login=True)
+    bdir = backups_dir()
+    if not lib_dir or not bdir:
+        return None
+    return BackupManager(bdir, lib_dir)
 
 
 def _conversations_dir():
-    os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
-    return CONVERSATIONS_DIR
+    cdir = conversations_dir()
+    if not cdir:
+        return None
+    os.makedirs(cdir, exist_ok=True)
+    return cdir
 
 
 def _load_conversation(conv_id):
-    path = os.path.join(_conversations_dir(), f'{conv_id}.json')
+    conv_dir = _conversations_dir()
+    if not conv_dir:
+        return None
+    path = os.path.join(conv_dir, f'{conv_id}.json')
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -35,7 +53,10 @@ def _load_conversation(conv_id):
 
 
 def _save_conversation(conv):
-    path = os.path.join(_conversations_dir(), f'{conv["id"]}.json')
+    conv_dir = _conversations_dir()
+    if not conv_dir:
+        return
+    path = os.path.join(conv_dir, f'{conv["id"]}.json')
     conv['updated_at'] = datetime.now().isoformat()
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(conv, f, ensure_ascii=False, indent=2)
@@ -107,11 +128,13 @@ def _strip_messages_for_api(messages):
 
 
 @ai_bp.route('/api/ai/providers', methods=['GET'])
+@require_login
 def get_providers():
     return jsonify({'success': True, 'providers': get_providers_info()})
 
 
 @ai_bp.route('/api/ai/validate-key', methods=['POST'])
+@require_login
 def validate_key():
     data = request.get_json()
     provider = data.get('provider', '')
@@ -123,6 +146,7 @@ def validate_key():
 
 
 @ai_bp.route('/api/ai/conversations', methods=['GET'])
+@require_login
 def list_conversations():
     conv_dir = _conversations_dir()
     convs = []
@@ -146,12 +170,13 @@ def list_conversations():
 
 
 @ai_bp.route('/api/ai/conversations/<conv_id>', methods=['GET', 'DELETE', 'PATCH'])
+@require_login
 def manage_conversation(conv_id):
     if request.method == 'DELETE':
         path = os.path.join(_conversations_dir(), f'{conv_id}.json')
         if os.path.exists(path):
             bm = _get_backup_manager()
-            removed_count = bm.delete_conversation_backups(conv_id)
+            removed_count = bm.delete_conversation_backups(conv_id) if bm else 0
             os.remove(path)
             return jsonify({'success': True, 'backups_removed': removed_count})
         return jsonify({'error': '对话不存在'}), 404
@@ -192,6 +217,7 @@ def manage_conversation(conv_id):
 
 
 @ai_bp.route('/api/ai/chat', methods=['POST'])
+@require_login
 def chat():
     data = request.get_json()
     user_message = data.get('message', '').strip()
@@ -226,10 +252,10 @@ def chat():
 
     attached_files = data.get('attached_files', [])
     if attached_files:
-        _lib = current_app.config['LIBRARY_FOLDER']
+        _lib = active_library_dir(require_login=True)
         for fpath in attached_files[:5]:
-            _fp = os.path.join(_lib, fpath.replace('\\', '/').strip('/'))
-            if os.path.isfile(_fp):
+            _fp = _safe_library_path(_lib, fpath.replace('\\', '/').strip('/'))
+            if _fp and os.path.isfile(_fp):
                 try:
                     with open(_fp, 'r', encoding='utf-8') as f:
                         _fc = f.read()
@@ -240,8 +266,10 @@ def chat():
     conv['messages'].append({'role': 'user', 'content': actual_user_content})
     _save_conversation(conv)
 
-    lib_dir = current_app.config['LIBRARY_FOLDER']
+    lib_dir = active_library_dir(require_login=True)
     bm = _get_backup_manager()
+    if not lib_dir or not bm:
+        return login_required_response()
 
     def generate():
         nonlocal conv
@@ -379,6 +407,7 @@ def chat():
 
 
 @ai_bp.route('/api/ai/conversations/<conv_id>/save-partial', methods=['POST'])
+@require_login
 def save_partial(conv_id):
     """当用户中断流式输出时，保存已接收的部分内容"""
     data = request.get_json()
@@ -408,6 +437,7 @@ def save_partial(conv_id):
 
 
 @ai_bp.route('/api/ai/conversations/<conv_id>/truncate', methods=['POST'])
+@require_login
 def truncate_conversation(conv_id):
     """截断对话到指定用户消息位置，并回滚之后的所有文件操作"""
     data = request.get_json()
@@ -464,6 +494,7 @@ def truncate_conversation(conv_id):
 
 
 @ai_bp.route('/api/ai/rollback', methods=['POST'])
+@require_login
 def rollback():
     data = request.get_json()
     group_id = data.get('backup_group_id', '')
@@ -473,18 +504,24 @@ def rollback():
         return jsonify({'error': '缺少备份组 ID'}), 400
 
     bm = _get_backup_manager()
+    if not bm:
+        return login_required_response()
     ok, msg = bm.rollback_operation(group_id, op_index)
     return jsonify({'success': ok, 'message': msg})
 
 
 @ai_bp.route('/api/ai/backups', methods=['GET'])
+@require_login
 def list_backups():
     bm = _get_backup_manager()
+    if not bm:
+        return login_required_response()
     backups = bm.list_backups()
     return jsonify({'success': True, 'backups': backups})
 
 
 @ai_bp.route('/api/ai/mcp/servers', methods=['GET'])
+@require_login
 def get_mcp_servers():
     """返回所有 MCP Server 的状态和工具列表。"""
     try:
@@ -496,6 +533,7 @@ def get_mcp_servers():
 
 
 @ai_bp.route('/api/ai/mcp/reload', methods=['POST'])
+@require_login
 def reload_mcp():
     """重新加载 mcp.json 配置（热更新）。"""
     try:

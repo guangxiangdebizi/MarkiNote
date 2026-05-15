@@ -16,6 +16,9 @@ env/
 # 运行时数据
 .ai_conversations/
 .ai_backups/
+user_data/
+lib/README.md
+lib/README_EN.md
 
 # 系统文件
 .DS_Store

@@ -19,10 +19,10 @@ def create_app():
     Config.init_app(app)
     
     # 注册蓝图
-    from app.routes import main_bp, library_bp, ai_bp
+    from app.routes import main_bp, library_bp, ai_bp, auth_bp
     app.register_blueprint(main_bp)
     app.register_blueprint(library_bp)
     app.register_blueprint(ai_bp)
+    app.register_blueprint(auth_bp)
     
     return app
-

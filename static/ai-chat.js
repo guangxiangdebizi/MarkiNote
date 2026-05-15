@@ -37,6 +37,13 @@
     const aiAttachBtn = document.getElementById('aiAttachBtn');
     const aiAttachmentsEl = document.getElementById('aiAttachments');
 
+    function ensureAuth(reason, afterLogin) {
+        if (typeof window.requireAuth === 'function') {
+            return window.requireAuth(reason, afterLogin);
+        }
+        return true;
+    }
+
     // --- 初始化 ---
     function initAI() {
         loadAISettings();
@@ -95,6 +102,8 @@
     }
 
     function showHistory() {
+        if (!ensureAuth('请登录后再查看 AI 对话历史。', showHistory)) return;
+
         aiShowingHistory = true;
         aiHistoryPanel.classList.add('show');
         aiChatArea.style.display = 'none';
@@ -118,7 +127,8 @@
         aiModelSelect.value = model;
         aiApiKeyInput.value = key;
 
-        const panelOpen = localStorage.getItem('aiPanelOpen') === 'true';
+        const savedPanelOpen = localStorage.getItem('aiPanelOpen');
+        const panelOpen = savedPanelOpen !== 'false';
         if (panelOpen) {
             document.querySelector('.app-container').classList.add('ai-panel-open');
             showWelcome();
@@ -163,6 +173,8 @@
     }
 
     async function validateKey() {
+        if (!ensureAuth('请登录后再验证和使用 AI 助手。', validateKey)) return;
+
         const key = aiApiKeyInput.value.trim();
         if (!key) {
             showKeyStatus(t('enter_api_key'), false);
@@ -217,6 +229,8 @@
 
     // --- 文件附件 ---
     async function showFilePicker() {
+        if (!ensureAuth('请登录后再给 AI 助手添加文件。', showFilePicker)) return;
+
         const existing = document.querySelector('.ai-file-picker');
         if (existing) { existing.remove(); return; }
 
@@ -491,6 +505,8 @@
     }
 
     window._aiLoadConv = async function (id) {
+        if (!ensureAuth('请登录后再查看 AI 对话。', () => window._aiLoadConv(id))) return;
+
         try {
             const resp = await fetch(`/api/ai/conversations/${id}`);
             const data = await resp.json();
@@ -544,6 +560,8 @@
     };
 
     window._aiRenameConv = function (id, btn) {
+        if (!ensureAuth('请登录后再管理 AI 对话。', () => window._aiRenameConv(id, btn))) return;
+
         const item = btn.closest('.ai-history-item');
         const titleEl = item.querySelector('.ai-history-item-title');
         const oldTitle = titleEl.textContent;
@@ -586,6 +604,8 @@
     };
 
     window._aiDeleteConv = async function (id, btn) {
+        if (!ensureAuth('请登录后再管理 AI 对话。', () => window._aiDeleteConv(id, btn))) return;
+
         if (!confirm(t('delete_conv_confirm'))) return;
         try {
             await fetch(`/api/ai/conversations/${id}`, { method: 'DELETE' });
@@ -601,6 +621,8 @@
     async function sendMessage() {
         const text = aiInput.value.trim();
         if (!text || aiIsStreaming) return;
+
+        if (!ensureAuth('请登录后再使用 AI 助手。', sendMessage)) return;
 
         const apiKey = aiApiKeyInput.value.trim();
         if (!apiKey) {

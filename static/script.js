@@ -7,6 +7,8 @@ let isEditingSource = false; // 是否正在编辑源代码
 let allFiles = []; // 存储所有文件用于搜索
 let hasUnsavedChanges = false; // 是否有未保存的改动
 let _lastDirItemsHash = ''; // 目录内容指纹，用于静默刷新去重
+let currentUser = null;
+let pendingAuthAction = null;
 
 // DOM元素
 const fileList = document.getElementById('fileList');
@@ -18,6 +20,15 @@ const uploadBtn = document.getElementById('uploadBtn');
 const newBtn = document.getElementById('newBtn');
 const searchBtn = document.getElementById('searchBtn');
 const settingsBtn = document.getElementById('settingsBtn');
+const authBtn = document.getElementById('authBtn');
+const authBtnText = document.getElementById('authBtnText');
+const authModal = document.getElementById('authModal');
+const authEmailInput = document.getElementById('authEmailInput');
+const authCodeInput = document.getElementById('authCodeInput');
+const authReason = document.getElementById('authReason');
+const authStatus = document.getElementById('authStatus');
+const sendAuthCodeBtn = document.getElementById('sendAuthCodeBtn');
+const loginSubmitBtn = document.getElementById('loginSubmitBtn');
 const settingsModal = document.getElementById('settingsModal');
 const fileInput = document.getElementById('fileInput');
 const viewSourceBtn = document.getElementById('viewSourceBtn');
@@ -76,6 +87,7 @@ async function copyToClipboard(text) {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
+    initAuth();
     loadLibrary();
     setupEventListeners();
     initializeMermaid();
@@ -87,6 +99,9 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupEventListeners() {
     uploadBtn.addEventListener('click', openUploadModal);
     newBtn.addEventListener('click', openNewSelectModal);
+    authBtn.addEventListener('click', handleAuthButtonClick);
+    sendAuthCodeBtn.addEventListener('click', sendAuthCode);
+    loginSubmitBtn.addEventListener('click', submitLogin);
     searchBtn.addEventListener('click', toggleSearch);
     settingsBtn.addEventListener('click', openSettingsModal);
     fileInput.addEventListener('change', handleFileUpload);
@@ -125,6 +140,17 @@ function setupEventListeners() {
         if (e.target === settingsModal) {
             closeSettingsModal();
         }
+        if (e.target === authModal) {
+            closeAuthModal();
+        }
+    });
+
+    authEmailInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendAuthCode();
+    });
+
+    authCodeInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') submitLogin();
     });
     
     // 回车键创建文件
@@ -155,9 +181,165 @@ function setupEventListeners() {
     loadTheme();
 }
 
+// ===== 登录状态和权限拦截 =====
+
+async function initAuth() {
+    try {
+        const response = await fetch('/api/auth/me');
+        const data = await response.json();
+        currentUser = data.authenticated ? data.user : null;
+        updateAuthUI();
+    } catch (error) {
+        currentUser = null;
+        updateAuthUI();
+    }
+}
+
+function isAuthenticated() {
+    return !!currentUser;
+}
+
+function updateAuthUI() {
+    if (!authBtnText) return;
+    if (currentUser) {
+        const email = currentUser.email || '已登录';
+        authBtn.title = `${email}，点击退出登录`;
+        authBtnText.textContent = email;
+    } else {
+        authBtn.title = '登录';
+        authBtnText.textContent = '登录';
+    }
+}
+
+function requireAuth(reason, afterLogin) {
+    if (isAuthenticated()) return true;
+    pendingAuthAction = typeof afterLogin === 'function' ? afterLogin : null;
+    openAuthModal(reason || '请登录后再进行操作');
+    return false;
+}
+
+window.requireAuth = requireAuth;
+
+function openAuthModal(reason) {
+    authReason.textContent = reason || '登录后可以管理自己的 Markdown 笔记，并使用 AI 助手。';
+    setAuthStatus('', null);
+    authModal.classList.add('show');
+    setTimeout(() => authEmailInput.focus(), 50);
+}
+
+function closeAuthModal() {
+    authModal.classList.remove('show');
+}
+
+function setAuthStatus(message, ok) {
+    authStatus.textContent = message || '';
+    authStatus.className = 'auth-status' + (message ? ' show' : '') + (ok === true ? ' success' : '') + (ok === false ? ' error' : '');
+}
+
+async function handleAuthButtonClick() {
+    if (!currentUser) {
+        openAuthModal('登录后可以管理自己的 Markdown 笔记，并使用 AI 助手。');
+        return;
+    }
+
+    if (!confirm('确定退出当前账号吗？')) return;
+
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+        currentUser = null;
+        updateAuthUI();
+        selectedFile = null;
+        currentMarkdownSource = '';
+        viewSourceBtn.disabled = true;
+        previewTitle.textContent = t('select_file_preview');
+        currentFilePath.textContent = '';
+        previewContent.innerHTML = `
+            <div class="welcome-message">
+                <h3>已退出登录</h3>
+                <p>左侧仍可阅读默认文档，登录后可管理个人笔记。</p>
+            </div>
+        `;
+        loadLibrary('');
+    }
+}
+
+async function sendAuthCode() {
+    const email = authEmailInput.value.trim();
+    if (!email) {
+        setAuthStatus('请输入邮箱', false);
+        return;
+    }
+
+    sendAuthCodeBtn.disabled = true;
+    sendAuthCodeBtn.textContent = '发送中...';
+
+    try {
+        const response = await fetch('/api/auth/send-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            setAuthStatus(data.error || '验证码发送失败', false);
+            return;
+        }
+        setAuthStatus(data.message || '验证码已发送', true);
+        authCodeInput.focus();
+    } catch (error) {
+        setAuthStatus('验证码发送失败: ' + error.message, false);
+    } finally {
+        sendAuthCodeBtn.disabled = false;
+        sendAuthCodeBtn.textContent = '获取验证码';
+    }
+}
+
+async function submitLogin() {
+    const email = authEmailInput.value.trim();
+    const code = authCodeInput.value.trim();
+
+    if (!email || !code) {
+        setAuthStatus('请输入邮箱和验证码', false);
+        return;
+    }
+
+    loginSubmitBtn.disabled = true;
+    loginSubmitBtn.textContent = '登录中...';
+
+    try {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            setAuthStatus(data.error || '登录失败', false);
+            return;
+        }
+
+        currentUser = data.user;
+        updateAuthUI();
+        closeAuthModal();
+        showSuccess('登录成功');
+        await loadLibrary('');
+
+        const action = pendingAuthAction;
+        pendingAuthAction = null;
+        if (action) setTimeout(action, 50);
+    } catch (error) {
+        setAuthStatus('登录失败: ' + error.message, false);
+    } finally {
+        loginSubmitBtn.disabled = false;
+        loginSubmitBtn.textContent = '登录 / 注册';
+    }
+}
+
 
 // 打开上传选择模态框
 function openUploadModal() {
+    if (!requireAuth('请登录后再上传文件。', openUploadModal)) return;
     uploadModal.classList.add('show');
 }
 
@@ -168,6 +350,7 @@ function closeUploadModal() {
 
 // 选择上传类型
 function selectUploadType(type) {
+    if (!requireAuth('请登录后再上传文件。', () => selectUploadType(type))) return;
     closeUploadModal();
     
     if (type === 'file') {
@@ -391,6 +574,11 @@ async function previewFile(path, silent = false) {
 
 // 文件上传（支持文件夹）
 async function handleFileUpload(event) {
+    if (!requireAuth('请登录后再上传文件。')) {
+        fileInput.value = '';
+        return;
+    }
+
     const files = Array.from(event.target.files);
     if (files.length === 0) return;
     
@@ -465,6 +653,7 @@ async function handleFileUpload(event) {
 
 // 打开新建文件夹模态框
 function openNewFolderModal() {
+    if (!requireAuth('请登录后再新建文件夹。', openNewFolderModal)) return;
     newFolderModal.classList.add('show');
     document.getElementById('folderNameInput').value = '';
     document.getElementById('folderNameInput').focus();
@@ -477,6 +666,8 @@ function closeNewFolderModal() {
 
 // 创建文件夹
 async function createFolder() {
+    if (!requireAuth('请登录后再新建文件夹。', createFolder)) return;
+
     const name = document.getElementById('folderNameInput').value.trim();
     
     if (!name) {
@@ -543,6 +734,11 @@ function showContextMenuFromButton(event, path, type) {
 // 右键菜单操作
 async function contextMenuAction(action) {
     if (!contextMenuTarget) return;
+
+    if (!requireAuth('请登录后再管理个人笔记。', () => contextMenuAction(action))) {
+        contextMenu.classList.remove('show');
+        return;
+    }
     
     const { path, type } = contextMenuTarget;
     
@@ -569,6 +765,8 @@ async function contextMenuAction(action) {
 
 // 打开移动文件模态框
 async function openMoveModal(sourcePath) {
+    if (!requireAuth('请登录后再移动文件。', () => openMoveModal(sourcePath))) return;
+
     const itemName = sourcePath.split('/').pop();
     document.getElementById('moveItemName').textContent = itemName;
     
@@ -703,6 +901,8 @@ async function moveItem(source, target) {
 
 // 删除文件/文件夹
 async function deleteItem(path) {
+    if (!requireAuth('请登录后再删除文件。', () => deleteItem(path))) return;
+
     try {
         const response = await fetch('/api/library/delete', {
             method: 'POST',
@@ -983,6 +1183,8 @@ function escapeHtml(text) {
 
 // 编辑源代码
 function editSourceCode() {
+    if (!requireAuth('请登录后再编辑文件。', editSourceCode)) return;
+
     isEditingSource = true;
     hasUnsavedChanges = false; // 重置未保存标志
     const codeElement = document.querySelector('#sourceContent code');
@@ -1040,6 +1242,8 @@ function cancelEditSourceCode() {
 
 // 保存源代码
 async function saveSourceCode() {
+    if (!requireAuth('请登录后再保存文件。', saveSourceCode)) return;
+
     if (!selectedFile) {
         showError(t('no_source'));
         return;
@@ -1279,6 +1483,7 @@ function loadTheme() {
 
 // 打开新建选择模态框
 function openNewSelectModal() {
+    if (!requireAuth('请登录后再新建文件或文件夹。', openNewSelectModal)) return;
     newSelectModal.classList.add('show');
 }
 
@@ -1302,6 +1507,7 @@ function selectNewType(type) {
 
 // 打开新建文件模态框
 function openNewFileModal() {
+    if (!requireAuth('请登录后再新建文件。', openNewFileModal)) return;
     newFileModal.classList.add('show');
     document.getElementById('fileNameInput').value = '';
     document.getElementById('fileExtensionSelect').value = 'md'; // 默认选择.md
@@ -1315,6 +1521,8 @@ function closeNewFileModal() {
 
 // 创建文件
 async function createFile() {
+    if (!requireAuth('请登录后再新建文件。', createFile)) return;
+
     const nameInput = document.getElementById('fileNameInput').value.trim();
     const extension = document.getElementById('fileExtensionSelect').value;
     
@@ -1371,6 +1579,7 @@ async function createFile() {
 
 // 打开新建文件夹模态框（保持原来的函数名）
 function openNewFolderModal() {
+    if (!requireAuth('请登录后再新建文件夹。', openNewFolderModal)) return;
     newFolderModal.classList.add('show');
     document.getElementById('folderNameInput').value = '';
     document.getElementById('folderNameInput').focus();

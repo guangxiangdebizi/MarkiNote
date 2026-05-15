@@ -51,6 +51,13 @@
                     MarkiNote
                 </h2>
                 <div class="library-actions">
+                    <button id="authBtn" class="btn btn-secondary auth-btn" title="登录">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                            <path d="M14 14s-1-4-6-4-6 4-6 4 1 1 6 1 6-1 6-1z"/>
+                        </svg>
+                        <span id="authBtnText">登录</span>
+                    </button>
                     <button id="searchBtn" class="btn btn-secondary" title="搜索文件">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
@@ -255,6 +262,35 @@
 
     <!-- 隐藏的文件上传输入框 - 智能支持文件和文件夹 -->
     <input type="file" id="fileInput" style="display: none;" multiple>
+
+    <!-- 模态框 - 邮箱登录 -->
+    <div id="authModal" class="modal">
+        <div class="modal-content auth-modal-content">
+            <div class="modal-header">
+                <h3>邮箱登录</h3>
+                <button class="close-btn" onclick="closeAuthModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="authReason" class="auth-reason">登录后可以管理自己的 Markdown 笔记，并使用 AI 助手。</p>
+                <div class="auth-field">
+                    <label for="authEmailInput">邮箱</label>
+                    <input type="email" id="authEmailInput" class="input-text" placeholder="name@example.com" autocomplete="email">
+                </div>
+                <div class="auth-field auth-code-row">
+                    <div>
+                        <label for="authCodeInput">验证码</label>
+                        <input type="text" id="authCodeInput" class="input-text" placeholder="6 位验证码" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+                    </div>
+                    <button class="btn btn-secondary" id="sendAuthCodeBtn">获取验证码</button>
+                </div>
+                <p id="authStatus" class="auth-status"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAuthModal()">取消</button>
+                <button class="btn btn-primary" id="loginSubmitBtn">登录 / 注册</button>
+            </div>
+        </div>
+    </div>
 
     <!-- 模态框 - 上传选择 -->
     <div id="uploadModal" class="modal">
