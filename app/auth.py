@@ -12,9 +12,11 @@ from functools import wraps
 from typing import List, Optional, Tuple
 
 from flask import current_app, jsonify, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
 
 def _now() -> str:
@@ -23,6 +25,10 @@ def _now() -> str:
 
 def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
+
+
+def normalize_username(username: str) -> str:
+    return (username or "").strip().lower()
 
 
 def _db_path() -> str:
@@ -47,6 +53,21 @@ def init_auth_storage() -> None:
                 created_at TEXT NOT NULL,
                 last_login_at TEXT
             )
+            """
+        )
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "username" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN username TEXT")
+        if "password_hash" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username
+            ON users(username)
+            WHERE username IS NOT NULL
             """
         )
         conn.execute(
@@ -165,12 +186,79 @@ def get_or_create_user(email: str) -> dict:
     return user
 
 
+def create_password_user(username: str, password: str) -> dict:
+    username = normalize_username(username)
+    if not USERNAME_RE.match(username):
+        raise ValueError("用户名只能包含字母、数字、下划线、点或短横线，长度 3-32 位")
+    if not password or len(password) < 8:
+        raise ValueError("密码长度不能少于 8 位")
+
+    email = f"{username}@local.finote"
+    password_hash = generate_password_hash(password)
+    init_auth_storage()
+
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ? OR email = ?",
+            (username, email),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE users SET username = ?, password_hash = ? WHERE id = ?",
+                (username, password_hash, row["id"]),
+            )
+            user_id = row["id"]
+        else:
+            user_id = secrets.token_hex(8)
+            conn.execute(
+                """
+                INSERT INTO users (id, email, username, password_hash, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, email, username, password_hash, _now()),
+            )
+
+        user = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+
+    ensure_user_workspace(user["id"])
+    return user
+
+
+def verify_password_user(username: str, password: str) -> Tuple[Optional[dict], str]:
+    username = normalize_username(username)
+    if not USERNAME_RE.match(username):
+        return None, "账号或密码不正确"
+    if not password:
+        return None, "账号或密码不正确"
+
+    init_auth_storage()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+        if not row or not row["password_hash"]:
+            return None, "账号或密码不正确"
+        if not check_password_hash(row["password_hash"], password):
+            return None, "账号或密码不正确"
+
+        conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (_now(), row["id"]))
+        user = dict(conn.execute("SELECT * FROM users WHERE id = ?", (row["id"],)).fetchone())
+
+    ensure_user_workspace(user["id"])
+    return user, "登录成功"
+
+
 def current_user() -> Optional[dict]:
     user_id = session.get("user_id")
     email = session.get("email")
     if not user_id or not email:
         return None
-    return {"id": user_id, "email": email}
+    return {
+        "id": user_id,
+        "email": email,
+        "username": session.get("username") or None,
+    }
 
 
 def is_logged_in() -> bool:

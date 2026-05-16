@@ -283,6 +283,18 @@
                     </div>
                     <button class="btn btn-secondary" id="sendAuthCodeBtn">获取验证码</button>
                 </div>
+                <div class="auth-divider"><span>或使用账号密码</span></div>
+                <div class="auth-field">
+                    <label for="authUsernameInput">用户名</label>
+                    <input type="text" id="authUsernameInput" class="input-text" placeholder="用户名" autocomplete="username">
+                </div>
+                <div class="auth-field auth-password-row">
+                    <div>
+                        <label for="authPasswordInput">密码</label>
+                        <input type="password" id="authPasswordInput" class="input-text" placeholder="密码" autocomplete="current-password">
+                    </div>
+                    <button class="btn btn-secondary" id="passwordLoginBtn">账号登录</button>
+                </div>
                 <p id="authStatus" class="auth-status"></p>
             </div>
             <div class="modal-footer">

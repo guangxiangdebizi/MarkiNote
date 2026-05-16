@@ -25,10 +25,13 @@ const authBtnText = document.getElementById('authBtnText');
 const authModal = document.getElementById('authModal');
 const authEmailInput = document.getElementById('authEmailInput');
 const authCodeInput = document.getElementById('authCodeInput');
+const authUsernameInput = document.getElementById('authUsernameInput');
+const authPasswordInput = document.getElementById('authPasswordInput');
 const authReason = document.getElementById('authReason');
 const authStatus = document.getElementById('authStatus');
 const sendAuthCodeBtn = document.getElementById('sendAuthCodeBtn');
 const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+const passwordLoginBtn = document.getElementById('passwordLoginBtn');
 const settingsModal = document.getElementById('settingsModal');
 const fileInput = document.getElementById('fileInput');
 const viewSourceBtn = document.getElementById('viewSourceBtn');
@@ -102,6 +105,7 @@ function setupEventListeners() {
     authBtn.addEventListener('click', handleAuthButtonClick);
     sendAuthCodeBtn.addEventListener('click', sendAuthCode);
     loginSubmitBtn.addEventListener('click', submitLogin);
+    passwordLoginBtn.addEventListener('click', submitPasswordLogin);
     searchBtn.addEventListener('click', toggleSearch);
     settingsBtn.addEventListener('click', openSettingsModal);
     fileInput.addEventListener('change', handleFileUpload);
@@ -151,6 +155,14 @@ function setupEventListeners() {
 
     authCodeInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') submitLogin();
+    });
+
+    authUsernameInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') authPasswordInput.focus();
+    });
+
+    authPasswordInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') submitPasswordLogin();
     });
     
     // 回车键创建文件
@@ -202,9 +214,9 @@ function isAuthenticated() {
 function updateAuthUI() {
     if (!authBtnText) return;
     if (currentUser) {
-        const email = currentUser.email || '已登录';
-        authBtn.title = `${email}，点击退出登录`;
-        authBtnText.textContent = email;
+        const name = currentUser.username || currentUser.email || '已登录';
+        authBtn.title = `${name}，点击退出登录`;
+        authBtnText.textContent = name;
     } else {
         authBtn.title = '登录';
         authBtnText.textContent = '登录';
@@ -319,21 +331,58 @@ async function submitLogin() {
             return;
         }
 
-        currentUser = data.user;
-        updateAuthUI();
-        closeAuthModal();
-        showSuccess('登录成功');
-        await loadLibrary('');
-
-        const action = pendingAuthAction;
-        pendingAuthAction = null;
-        if (action) setTimeout(action, 50);
+        await finishAuthLogin(data.user);
     } catch (error) {
         setAuthStatus('登录失败: ' + error.message, false);
     } finally {
         loginSubmitBtn.disabled = false;
         loginSubmitBtn.textContent = '登录 / 注册';
     }
+}
+
+async function submitPasswordLogin() {
+    const username = authUsernameInput.value.trim();
+    const password = authPasswordInput.value;
+
+    if (!username || !password) {
+        setAuthStatus('请输入用户名和密码', false);
+        return;
+    }
+
+    passwordLoginBtn.disabled = true;
+    passwordLoginBtn.textContent = '登录中...';
+
+    try {
+        const response = await fetch('/api/auth/password-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            setAuthStatus(data.error || '登录失败', false);
+            return;
+        }
+
+        await finishAuthLogin(data.user);
+    } catch (error) {
+        setAuthStatus('登录失败: ' + error.message, false);
+    } finally {
+        passwordLoginBtn.disabled = false;
+        passwordLoginBtn.textContent = '账号登录';
+    }
+}
+
+async function finishAuthLogin(user) {
+    currentUser = user;
+    updateAuthUI();
+    closeAuthModal();
+    showSuccess('登录成功');
+    await loadLibrary('');
+
+    const action = pendingAuthAction;
+    pendingAuthAction = null;
+    if (action) setTimeout(action, 50);
 }
 
 

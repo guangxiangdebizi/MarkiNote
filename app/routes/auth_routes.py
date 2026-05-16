@@ -7,8 +7,10 @@ from app.auth import (
     current_user,
     get_or_create_user,
     normalize_email,
+    normalize_username,
     send_email_code,
     verify_email_code,
+    verify_password_user,
 )
 
 auth_bp = Blueprint('auth', __name__)
@@ -54,6 +56,29 @@ def login():
     user = get_or_create_user(email)
     session['user_id'] = user['id']
     session['email'] = user['email']
+    session['username'] = user.get('username') or ''
+    session.permanent = True
+
+    return jsonify({
+        'success': True,
+        'message': '登录成功',
+        'user': current_user(),
+    })
+
+
+@auth_bp.route('/api/auth/password-login', methods=['POST'])
+def password_login():
+    data = request.get_json() or {}
+    username = normalize_username(data.get('username', ''))
+    password = data.get('password', '') or ''
+
+    user, message = verify_password_user(username, password)
+    if not user:
+        return jsonify({'success': False, 'error': message}), 400
+
+    session['user_id'] = user['id']
+    session['email'] = user['email']
+    session['username'] = user.get('username') or ''
     session.permanent = True
 
     return jsonify({
