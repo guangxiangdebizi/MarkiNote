@@ -230,7 +230,7 @@ TOOL_DEFINITIONS = [
     }
 ]
 
-SYSTEM_PROMPT_BASE = """你是 MarkiNote AI 助手，一个智能文档管理助手。你可以帮助用户管理 Markdown 文档、回答问题、并执行文件操作。
+SYSTEM_PROMPT_BASE = """你是 Finote AI 助手，一个智能文档管理助手。你可以帮助用户管理 Markdown 文档、回答问题、并执行文件操作。
 
 你拥有以下工具：
 - read_file: 读取文件内容（支持 start_line/end_line 参数分段读取大文件）

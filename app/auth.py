@@ -128,15 +128,15 @@ def send_email_code(email: str, code: str) -> Tuple[bool, str]:
     sender = os.environ.get("MARKINOTE_SMTP_FROM") or user
 
     if not user or not password or not sender:
-        current_app.logger.warning("MarkiNote email code for %s: %s", email, code)
-        print(f"[MarkiNote auth] email code for {email}: {code}", flush=True)
+        current_app.logger.warning("Finote email code for %s: %s", email, code)
+        print(f"[Finote auth] email code for {email}: {code}", flush=True)
         return False, "SMTP 未配置，验证码已写入服务日志"
 
     msg = EmailMessage()
-    msg["Subject"] = "MarkiNote 登录验证码"
+    msg["Subject"] = "Finote 登录验证码"
     msg["From"] = sender
     msg["To"] = email
-    msg.set_content(f"你的 MarkiNote 登录验证码是：{code}\n\n验证码 10 分钟内有效。")
+    msg.set_content(f"你的 Finote 登录验证码是：{code}\n\n验证码 10 分钟内有效。")
 
     import smtplib
 

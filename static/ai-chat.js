@@ -1,4 +1,4 @@
-// ===== MarkiNote AI 助手 =====
+// ===== Finote AI 助手 =====
 
 (function () {
     'use strict';

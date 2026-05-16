@@ -1,6 +1,6 @@
-# Welcome to MarkiNote ✨
+# Welcome to Finote ✨
 
-你好！欢迎来到 **MarkiNote** —— 你的智能 Markdown 文档管理与 AI 协作伙伴。
+你好！欢迎来到 **Finote** —— 你的智能 Markdown 文档管理与 AI 协作伙伴。
 
 这是一个不仅仅能**阅读** Markdown，还能**理解**你的需求并**主动帮你管理文档**的 AI Agent 系统。
 
@@ -33,7 +33,7 @@
 
 ## 🤖 AI Agent 能为你做什么？
 
-MarkiNote 的 AI 不是简单的聊天机器人，它拥有**真实操作能力**：
+Finote 的 AI 不是简单的聊天机器人，它拥有**真实操作能力**：
 
 | 能力 | 示例指令 |
 |------|----------|
@@ -51,7 +51,7 @@ MarkiNote 的 AI 不是简单的聊天机器人，它拥有**真实操作能力*
 
 ## ✨ Markdown 全功能支持
 
-MarkiNote 完美支持以下渲染：
+Finote 完美支持以下渲染：
 
 ### 数学公式 (LaTeX)
 
@@ -68,7 +68,7 @@ graph LR
 
 ### 代码高亮
 ```python
-def hello_markinote():
+def hello_finote():
     print("Hello, AI-powered Markdown!")
 ```
 
@@ -116,8 +116,8 @@ def hello_markinote():
 
 | 资源 | 链接 |
 |------|------|
-| 📖 完整文档 | [项目 README](https://github.com/wink-wink-wink555/MarkiNote) |
-| 🐛 报告问题 | [GitHub Issues](https://github.com/wink-wink-wink555/MarkiNote/issues) |
+| 📖 完整文档 | [项目 README](https://github.com/wink-wink-wink555/Finote) |
+| 🐛 报告问题 | [GitHub Issues](https://github.com/wink-wink-wink555/Finote/issues) |
 | ⭐ 支持项目 | 在 GitHub 给我们一个 Star！ |
 
 ---
@@ -130,6 +130,6 @@ def hello_markinote():
 
 ---
 
-祝你在 MarkiNote 中写作愉快！✨
+祝你在 Finote 中写作愉快！✨
 
 **Made with ❤️ by [wink-wink-wink555](https://github.com/wink-wink-wink555)**

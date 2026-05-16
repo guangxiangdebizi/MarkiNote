@@ -2,7 +2,7 @@
 MCP Manager — 统一管理所有 MCP Server 的工具注册与调用分发。
 
 通过读取 mcp.json 配置，自动实例化对应类型的客户端（SSE / StreamableHttp / Stdio），
-并将所有工具以 OpenAI function calling 格式暴露给 MarkiNote AI Agent。
+并将所有工具以 OpenAI function calling 格式暴露给 Finote AI Agent。
 
 工具命名规范：mcp__<server_name>__<original_tool_name>
 

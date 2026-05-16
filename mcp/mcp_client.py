@@ -74,7 +74,7 @@ class StdioMCPClient:
         self._send_request('initialize', {
             'protocolVersion': '2024-11-05',
             'capabilities': {},
-            'clientInfo': {'name': 'MarkiNote-MCP', 'version': '1.0'}
+            'clientInfo': {'name': 'Finote-MCP', 'version': '1.0'}
         })
         return self._proc
 

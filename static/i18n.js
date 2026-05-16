@@ -1,4 +1,4 @@
-// ===== MarkiNote 国际化系统 =====
+// ===== Finote 国际化系统 =====
 (function () {
     'use strict';
 
@@ -14,7 +14,7 @@
             no_search_hint: '试试其他关键词',
             select_file_preview: '选择文件以预览', view_source: '查看源代码',
             ai_assistant: 'AI 助手',
-            welcome_title: '欢迎使用 MarkiNote',
+            welcome_title: '欢迎使用 Finote',
             welcome_desc: '从左侧选择一个文件开始预览',
             welcome_tip: '支持的文件格式：.md、.markdown、.txt',
             upload_select: '选择上传方式', upload_file: '上传文件', upload_folder: '上传文件夹',
@@ -100,7 +100,7 @@
             no_search_hint: 'Try other keywords',
             select_file_preview: 'Select a file to preview', view_source: 'View Source',
             ai_assistant: 'AI Assistant',
-            welcome_title: 'Welcome to MarkiNote',
+            welcome_title: 'Welcome to Finote',
             welcome_desc: 'Select a file from the left panel to preview',
             welcome_tip: 'Supported formats: .md, .markdown, .txt',
             upload_select: 'Choose Upload Method', upload_file: 'Upload File', upload_folder: 'Upload Folder',
@@ -186,7 +186,7 @@
             no_search_hint: "Essayez d'autres mots-clés",
             select_file_preview: 'Sélectionnez un fichier', view_source: 'Voir la source',
             ai_assistant: 'Assistant IA',
-            welcome_title: 'Bienvenue sur MarkiNote',
+            welcome_title: 'Bienvenue sur Finote',
             welcome_desc: 'Sélectionnez un fichier à gauche pour le prévisualiser',
             welcome_tip: 'Formats supportés : .md, .markdown, .txt',
             upload_select: 'Méthode de téléchargement', upload_file: 'Fichier', upload_folder: 'Dossier',
@@ -270,7 +270,7 @@
             no_search_hint: '他のキーワードをお試しください',
             select_file_preview: 'ファイルを選択してプレビュー', view_source: 'ソースを表示',
             ai_assistant: 'AIアシスタント',
-            welcome_title: 'MarkiNote へようこそ',
+            welcome_title: 'Finote へようこそ',
             welcome_desc: '左側からファイルを選択してプレビュー',
             welcome_tip: '対応形式：.md、.markdown、.txt',
             upload_select: 'アップロード方法', upload_file: 'ファイル', upload_folder: 'フォルダ',

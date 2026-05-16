@@ -1,6 +1,6 @@
-# Welcome to MarkiNote ✨
+# Welcome to Finote ✨
 
-Hello! Welcome to **MarkiNote** — your intelligent Markdown document management and AI collaboration companion.
+Hello! Welcome to **Finote** — your intelligent Markdown document management and AI collaboration companion.
 
 This is not just a Markdown **reader**, but an AI Agent system that **understands** your needs and **actively helps you manage documents**.
 
@@ -33,7 +33,7 @@ Watch how the AI **automatically calls tools** to complete the task!
 
 ## 🤖 What Can the AI Agent Do for You?
 
-MarkiNote's AI is not just a simple chatbot — it has **real operational capabilities**:
+Finote's AI is not just a simple chatbot — it has **real operational capabilities**:
 
 | Capability | Example Commands |
 |------------|------------------|
@@ -51,7 +51,7 @@ When the AI uses tools, you'll see **tool cards** displaying the operation proce
 
 ## ✨ Full Markdown Support
 
-MarkiNote perfectly renders the following:
+Finote perfectly renders the following:
 
 ### Math Formulas (LaTeX)
 
@@ -68,7 +68,7 @@ graph LR
 
 ### Code Highlighting
 ```python
-def hello_markinote():
+def hello_finote():
     print("Hello, AI-powered Markdown!")
 ```
 
@@ -116,8 +116,8 @@ def hello_markinote():
 
 | Resource | Link |
 |----------|------|
-| 📖 Full Documentation | [Project README](https://github.com/wink-wink-wink555/MarkiNote) |
-| 🐛 Report Issues | [GitHub Issues](https://github.com/wink-wink-wink555/MarkiNote/issues) |
+| 📖 Full Documentation | [Project README](https://github.com/wink-wink-wink555/Finote) |
+| 🐛 Report Issues | [GitHub Issues](https://github.com/wink-wink-wink555/Finote/issues) |
 | ⭐ Support Project | Give us a Star on GitHub! |
 
 ---
@@ -130,6 +130,6 @@ def hello_markinote():
 
 ---
 
-Happy writing in MarkiNote! ✨
+Happy writing in Finote! ✨
 
 **Made with ❤️ by [wink-wink-wink555](https://github.com/wink-wink-wink555)**
