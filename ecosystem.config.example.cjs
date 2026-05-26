@@ -13,7 +13,10 @@ module.exports = {
       max_memory_restart: "512M",
       env: {
         PYTHONUNBUFFERED: "1",
-        FLASK_ENV: "production"
+        FLASK_ENV: "production",
+        // Copy to ecosystem.config.cjs (gitignored) and fill in real values on the server.
+        MARKINOTE_QQMAIL_AUTH_CODE: "",
+        MARKINOTE_DEEPSEEK_API_KEY: "",
       }
     }
   ]

@@ -1,5 +1,6 @@
 # 敏感配置文件 - 含 API Key / Token，绝不提交
 mcp.json
+ecosystem.config.cjs
 
 # Python
 __pycache__/
