@@ -11,6 +11,20 @@
     let aiShowingHistory = false;
     let userMsgCounter = 0;
     let aiAttachedFiles = [];
+    let aiProvidersInfo = {};
+
+    const FALLBACK_MODELS = {
+        deepseek: [
+            { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+            { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+            { id: 'deepseek-chat', name: 'DeepSeek V3' }
+        ],
+        kimi: [
+            { id: 'moonshot-v1-8k', name: 'Moonshot 8K' },
+            { id: 'moonshot-v1-32k', name: 'Moonshot 32K' },
+            { id: 'moonshot-v1-128k', name: 'Moonshot 128K' }
+        ]
+    };
 
     // --- DOM ---
     const aiPanel = document.getElementById('aiPanel');
@@ -45,12 +59,61 @@
     }
 
     // --- 初始化 ---
-    function initAI() {
+    async function initAI() {
+        await fetchProviders();
         loadAISettings();
         setupAIListeners();
         updateModelOptions();
         initResizeHandles();
         restorePanelSizes();
+    }
+
+    async function fetchProviders() {
+        try {
+            const resp = await fetch('/api/ai/providers');
+            const data = await resp.json();
+            if (data.success && data.providers) {
+                aiProvidersInfo = data.providers;
+                updateProviderOptions();
+            }
+        } catch (e) {
+            console.warn('加载 AI 提供商列表失败，使用本地默认配置', e);
+        }
+    }
+
+    function updateProviderOptions() {
+        const providers = Object.entries(aiProvidersInfo);
+        if (!providers.length) return;
+
+        const current = aiProviderSelect.value;
+        aiProviderSelect.innerHTML = providers.map(([id, info]) =>
+            `<option value="${id}">${escapeHtml(info.name || id)}</option>`
+        ).join('');
+
+        if (providers.some(([id]) => id === current)) {
+            aiProviderSelect.value = current;
+        } else {
+            aiProviderSelect.value = providers[0][0];
+        }
+    }
+
+    function getProviderInfo(providerId) {
+        return aiProvidersInfo[providerId] || null;
+    }
+
+    function providerHasDefaultKey(providerId) {
+        return Boolean(getProviderInfo(providerId)?.has_default_key);
+    }
+
+    function getDefaultModel(providerId) {
+        const info = getProviderInfo(providerId);
+        if (info?.default_model) return info.default_model;
+        const list = info?.models || FALLBACK_MODELS[providerId] || [];
+        return list[0]?.id || '';
+    }
+
+    function hasUsableApiKey(providerId) {
+        return Boolean(aiApiKeyInput.value.trim() || providerHasDefaultKey(providerId));
     }
 
     function setupAIListeners() {
@@ -119,13 +182,18 @@
     // --- 设置管理 ---
     function loadAISettings() {
         const provider = localStorage.getItem('aiProvider') || 'deepseek';
-        const model = localStorage.getItem('aiModel') || 'deepseek-chat';
+        const model = localStorage.getItem('aiModel') || getDefaultModel(provider) || 'deepseek-v4-pro';
         const key = localStorage.getItem('aiApiKey') || '';
 
         aiProviderSelect.value = provider;
         updateModelOptions();
-        aiModelSelect.value = model;
+        if (aiModelSelect.querySelector(`option[value="${model}"]`)) {
+            aiModelSelect.value = model;
+        } else {
+            aiModelSelect.value = getDefaultModel(provider) || model;
+        }
         aiApiKeyInput.value = key;
+        updateApiKeyHint();
 
         const savedPanelOpen = localStorage.getItem('aiPanelOpen');
         const panelOpen = savedPanelOpen !== 'false';
@@ -144,31 +212,35 @@
     function onProviderChange() {
         updateModelOptions();
         saveAISettings();
+        updateApiKeyHint();
         aiKeyStatus.className = 'ai-key-status';
         aiKeyStatus.style.display = 'none';
     }
 
-    function updateModelOptions() {
-        const models = {
-            deepseek: [
-                { id: 'deepseek-chat', name: 'DeepSeek-V3' }
-            ],
-            kimi: [
-                { id: 'moonshot-v1-8k', name: 'Moonshot 8K' },
-                { id: 'moonshot-v1-32k', name: 'Moonshot 32K' },
-                { id: 'moonshot-v1-128k', name: 'Moonshot 128K' }
-            ]
-        };
-
+    function updateApiKeyHint() {
         const provider = aiProviderSelect.value;
-        const list = models[provider] || [];
+        if (providerHasDefaultKey(provider) && !aiApiKeyInput.value.trim()) {
+            aiApiKeyInput.placeholder = t('api_key_server_configured') || '服务端已配置，可留空直接使用';
+        } else {
+            aiApiKeyInput.placeholder = t('api_key_placeholder');
+        }
+    }
+
+    function updateModelOptions() {
+        const provider = aiProviderSelect.value;
+        const info = getProviderInfo(provider);
+        const list = info?.models || FALLBACK_MODELS[provider] || [];
+        const defaultModel = getDefaultModel(provider);
+
         aiModelSelect.innerHTML = list.map(m =>
-            `<option value="${m.id}">${m.name}</option>`
+            `<option value="${m.id}">${escapeHtml(m.name)}</option>`
         ).join('');
 
         const saved = localStorage.getItem('aiModel');
         if (saved && list.some(m => m.id === saved)) {
             aiModelSelect.value = saved;
+        } else if (defaultModel && list.some(m => m.id === defaultModel)) {
+            aiModelSelect.value = defaultModel;
         }
     }
 
@@ -176,7 +248,8 @@
         if (!ensureAuth('请登录后再验证和使用 AI 助手。', validateKey)) return;
 
         const key = aiApiKeyInput.value.trim();
-        if (!key) {
+        const provider = aiProviderSelect.value;
+        if (!key && !providerHasDefaultKey(provider)) {
             showKeyStatus(t('enter_api_key'), false);
             return;
         }
@@ -625,7 +698,8 @@
         if (!ensureAuth('请登录后再使用 AI 助手。', sendMessage)) return;
 
         const apiKey = aiApiKeyInput.value.trim();
-        if (!apiKey) {
+        const provider = aiProviderSelect.value;
+        if (!hasUsableApiKey(provider)) {
             aiSettingsPanel.classList.add('show');
             showKeyStatus(t('set_api_key_first'), false);
             aiApiKeyInput.focus();
@@ -685,6 +759,8 @@
             const decoder = new TextDecoder();
             let buffer = '';
             let assistantText = '';
+            let assistantReasoning = '';
+            let reasoningBlock = null;
             let typingRemoved = false;
             let needNewBubble = false;
             let currentBubble = bubbleEl;
@@ -714,6 +790,19 @@
                         switch (currentEvent) {
                             case 'conversation_id':
                                 aiConversationId = eventData.id;
+                                break;
+
+                            case 'reasoning':
+                                if (!reasoningBlock) {
+                                    reasoningBlock = ensureReasoningBlock(assistantEl, currentBubble);
+                                }
+                                if (!typingRemoved) {
+                                    removeTypingIndicator(currentBubble);
+                                    typingRemoved = true;
+                                }
+                                assistantReasoning += eventData.content;
+                                updateReasoningBlock(reasoningBlock, assistantReasoning);
+                                scrollToBottom();
                                 break;
 
                             case 'token':
@@ -899,6 +988,25 @@
         aiMessages.appendChild(div);
         scrollToBottom();
         return div;
+    }
+
+    function ensureReasoningBlock(parentEl, beforeEl) {
+        const block = document.createElement('div');
+        block.className = 'ai-reasoning';
+        block.innerHTML = `
+            <button type="button" class="ai-reasoning-toggle">${t('reasoning_toggle')}</button>
+            <div class="ai-reasoning-content"></div>
+        `;
+        const toggle = block.querySelector('.ai-reasoning-toggle');
+        const content = block.querySelector('.ai-reasoning-content');
+        toggle.addEventListener('click', () => content.classList.toggle('show'));
+        parentEl.insertBefore(block, beforeEl);
+        return block;
+    }
+
+    function updateReasoningBlock(block, text) {
+        const content = block.querySelector('.ai-reasoning-content');
+        if (content) content.textContent = text;
     }
 
     function showTypingIndicator(bubble) {

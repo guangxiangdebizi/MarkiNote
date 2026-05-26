@@ -651,7 +651,7 @@ def _summarize_with_subagent(content, url, api_key, provider_id, model_id):
         if provider_id == 'kimi':
             summary_model = 'moonshot-v1-8k'
         elif provider_id == 'deepseek':
-            summary_model = 'deepseek-chat'
+            summary_model = 'deepseek-v4-flash'
 
         input_content = content[:20000]
 

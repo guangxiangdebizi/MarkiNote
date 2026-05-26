@@ -1,18 +1,23 @@
 """AI API 提供商适配层 — DeepSeek / Kimi (Moonshot)"""
 import json
+import os
 import requests
 
 PROVIDERS = {
     'deepseek': {
         'name': 'DeepSeek',
         'base_url': 'https://api.deepseek.com',
+        'default_model': 'deepseek-v4-pro',
         'models': [
-            {'id': 'deepseek-chat', 'name': 'DeepSeek-V3'},
+            {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro'},
+            {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash'},
+            {'id': 'deepseek-chat', 'name': 'DeepSeek V3'},
         ]
     },
     'kimi': {
         'name': 'Kimi (Moonshot)',
         'base_url': 'https://api.moonshot.cn/v1',
+        'default_model': 'moonshot-v1-8k',
         'models': [
             {'id': 'moonshot-v1-8k', 'name': 'Moonshot 8K'},
             {'id': 'moonshot-v1-32k', 'name': 'Moonshot 32K'},
@@ -22,14 +27,44 @@ PROVIDERS = {
 }
 
 
+def get_default_api_key(provider_id):
+    env_map = {
+        'deepseek': ('MARKINOTE_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'),
+        'kimi': ('MARKINOTE_KIMI_API_KEY', 'MOONSHOT_API_KEY', 'KIMI_API_KEY'),
+    }
+    for name in env_map.get(provider_id, ()):
+        value = os.environ.get(name, '').strip()
+        if value:
+            return value
+    return ''
+
+
+def resolve_api_key(provider_id, api_key=''):
+    api_key = (api_key or '').strip()
+    if api_key:
+        return api_key
+    return get_default_api_key(provider_id)
+
+
 def get_providers_info():
-    return {k: {'name': v['name'], 'models': v['models']} for k, v in PROVIDERS.items()}
+    return {
+        k: {
+            'name': v['name'],
+            'models': v['models'],
+            'default_model': v.get('default_model'),
+            'has_default_key': bool(get_default_api_key(k)),
+        }
+        for k, v in PROVIDERS.items()
+    }
 
 
 def validate_api_key(provider_id, api_key):
     provider = PROVIDERS.get(provider_id)
     if not provider:
         return False, '未知提供商'
+    api_key = resolve_api_key(provider_id, api_key)
+    if not api_key:
+        return False, '请先设置 API Key'
     try:
         url = f"{provider['base_url']}/models"
         resp = requests.get(url, headers={'Authorization': f'Bearer {api_key}'}, timeout=10)
@@ -49,6 +84,7 @@ def stream_chat_completion(messages, tools, api_key, provider_id, model_id):
     """
     流式调用 AI API，yield 解析后的事件字典:
       {"type": "content", "content": "..."}
+      {"type": "reasoning", "content": "..."}
       {"type": "tool_call_start", "index": 0, "id": "...", "name": "..."}
       {"type": "tool_call_args", "index": 0, "arguments": "..."}
       {"type": "done"}
@@ -109,6 +145,9 @@ def stream_chat_completion(messages, tools, api_key, provider_id, model_id):
 
             delta = choices[0].get('delta', {})
             finish = choices[0].get('finish_reason')
+
+            if delta.get('reasoning_content'):
+                yield {'type': 'reasoning', 'content': delta['reasoning_content']}
 
             if 'content' in delta and delta['content']:
                 yield {'type': 'content', 'content': delta['content']}

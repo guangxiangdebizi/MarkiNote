@@ -4,8 +4,8 @@ import json
 import uuid
 from datetime import datetime
 from flask import Blueprint, Response, request, jsonify, current_app
-from app.auth import active_library_dir, backups_dir, conversations_dir, login_required_response, require_login
-from app.utils.ai_provider import stream_chat_completion, get_providers_info, validate_api_key
+from app.auth import active_library_dir, backups_dir, conversations_dir, current_user, login_required_response, require_login, user_root, ensure_user_workspace
+from app.utils.ai_provider import stream_chat_completion, get_providers_info, validate_api_key, resolve_api_key, PROVIDERS
 from app.utils.ai_tools import TOOL_DEFINITIONS, SYSTEM_PROMPT, execute_tool, get_system_prompt, get_all_tool_definitions, execute_mcp_tool
 from app.utils.ai_backup import BackupManager
 import requests as http_requests
@@ -25,15 +25,20 @@ def _safe_library_path(base_path, rel_path):
     return full_path
 
 
-def _get_backup_manager():
-    lib_dir = active_library_dir(require_login=True)
-    bdir = backups_dir()
-    if not lib_dir or not bdir:
+def _get_backup_manager(lib_dir=None, backup_dir=None):
+    if lib_dir is None:
+        lib_dir = active_library_dir(require_login=True)
+    if backup_dir is None:
+        backup_dir = backups_dir()
+    if not lib_dir or not backup_dir:
         return None
-    return BackupManager(bdir, lib_dir)
+    return BackupManager(backup_dir, lib_dir)
 
 
-def _conversations_dir():
+def _conversations_dir(explicit_dir=None):
+    if explicit_dir:
+        os.makedirs(explicit_dir, exist_ok=True)
+        return explicit_dir
     cdir = conversations_dir()
     if not cdir:
         return None
@@ -41,8 +46,8 @@ def _conversations_dir():
     return cdir
 
 
-def _load_conversation(conv_id):
-    conv_dir = _conversations_dir()
+def _load_conversation(conv_id, conv_dir=None):
+    conv_dir = _conversations_dir(conv_dir)
     if not conv_dir:
         return None
     path = os.path.join(conv_dir, f'{conv_id}.json')
@@ -52,14 +57,29 @@ def _load_conversation(conv_id):
     return None
 
 
-def _save_conversation(conv):
-    conv_dir = _conversations_dir()
+def _save_conversation(conv, conv_dir=None):
+    conv_dir = _conversations_dir(conv_dir)
     if not conv_dir:
         return
     path = os.path.join(conv_dir, f'{conv["id"]}.json')
     conv['updated_at'] = datetime.now().isoformat()
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(conv, f, ensure_ascii=False, indent=2)
+
+
+def _resolve_user_paths():
+    """在请求上下文中解析用户路径，供 SSE 生成器使用（生成器内不能访问 session）。"""
+    user = current_user()
+    if not user:
+        return None, None, None, None
+    ensure_user_workspace(user['id'])
+    root = user_root(user['id'])
+    return (
+        os.path.join(root, 'conversations'),
+        os.path.join(root, 'library'),
+        os.path.join(root, 'backups'),
+        user['id'],
+    )
 
 
 def _sse_event(event_type, data):
@@ -112,6 +132,9 @@ def _strip_messages_for_api(messages):
     cleaned = []
     for msg in messages:
         m = {k: v for k, v in msg.items() if k in ('role', 'content', 'tool_calls', 'tool_call_id', 'name')}
+        reasoning = msg.get('_reasoning') or msg.get('reasoning_content')
+        if reasoning and m.get('role') == 'assistant':
+            m['reasoning_content'] = reasoning
         if m.get('role') == 'assistant' and m.get('tool_calls'):
             if not m.get('content'):
                 m['content'] = None
@@ -138,9 +161,11 @@ def get_providers():
 def validate_key():
     data = request.get_json()
     provider = data.get('provider', '')
-    api_key = data.get('api_key', '')
-    if not provider or not api_key:
+    api_key = resolve_api_key(provider, data.get('api_key', ''))
+    if not provider:
         return jsonify({'success': False, 'message': '缺少参数'}), 400
+    if not api_key:
+        return jsonify({'success': False, 'message': '请先设置 API Key'}), 400
     ok, msg = validate_api_key(provider, api_key)
     return jsonify({'success': ok, 'message': msg})
 
@@ -223,8 +248,9 @@ def chat():
     user_message = data.get('message', '').strip()
     conv_id = data.get('conversation_id', '')
     provider_id = data.get('provider', 'deepseek')
-    model_id = data.get('model', 'deepseek-chat')
-    api_key = data.get('api_key', '')
+    provider_cfg = PROVIDERS.get(provider_id, {})
+    model_id = data.get('model') or provider_cfg.get('default_model', 'deepseek-v4-pro')
+    api_key = resolve_api_key(provider_id, data.get('api_key', ''))
     context_file = data.get('context_file', '')
     language = data.get('language', 'zh-CN')
 
@@ -264,11 +290,15 @@ def chat():
                     pass
 
     conv['messages'].append({'role': 'user', 'content': actual_user_content})
-    _save_conversation(conv)
 
-    lib_dir = active_library_dir(require_login=True)
-    bm = _get_backup_manager()
-    if not lib_dir or not bm:
+    user_conv_dir, lib_dir, backup_dir, _user_id = _resolve_user_paths()
+    if not user_conv_dir or not lib_dir or not backup_dir:
+        return login_required_response()
+
+    _save_conversation(conv, user_conv_dir)
+
+    bm = _get_backup_manager(lib_dir, backup_dir)
+    if not bm:
         return login_required_response()
 
     def generate():
@@ -284,6 +314,7 @@ def chat():
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             assistant_content = ''
+            assistant_reasoning = ''
             tool_calls_map = {}
 
             for event in stream_chat_completion(
@@ -293,6 +324,9 @@ def chat():
                 if etype == 'content':
                     assistant_content += event['content']
                     yield _sse_event('token', {'content': event['content']})
+                elif etype == 'reasoning':
+                    assistant_reasoning += event['content']
+                    yield _sse_event('reasoning', {'content': event['content']})
                 elif etype == 'tool_call_start':
                     idx = event['index']
                     tool_calls_map[idx] = {
@@ -312,7 +346,7 @@ def chat():
                         tool_calls_map[idx]['function']['arguments'] += event['arguments']
                 elif etype == 'error':
                     yield _sse_event('error', {'message': event['message']})
-                    _save_conversation(conv)
+                    _save_conversation(conv, user_conv_dir)
                     return
                 elif etype in ('done', 'tool_calls_complete'):
                     break
@@ -321,10 +355,14 @@ def chat():
 
             if tool_calls:
                 asst_msg = {'role': 'assistant', 'content': assistant_content or '', 'tool_calls': tool_calls}
+                if assistant_reasoning:
+                    asst_msg['_reasoning'] = assistant_reasoning
                 conv['messages'].append(asst_msg)
                 messages_for_api.append(_strip_messages_for_api([asst_msg])[0])
             else:
                 asst_msg = {'role': 'assistant', 'content': assistant_content or ''}
+                if assistant_reasoning:
+                    asst_msg['_reasoning'] = assistant_reasoning
                 conv['messages'].append(asst_msg)
                 break
 
@@ -380,7 +418,7 @@ def chat():
                     'content': context_result
                 })
 
-            _save_conversation(conv)
+            _save_conversation(conv, user_conv_dir)
 
         if backup_group_id:
             bm.cleanup()
@@ -392,7 +430,7 @@ def chat():
                 conv['title'] = title
                 yield _sse_event('title_generated', {'title': title})
 
-        _save_conversation(conv)
+        _save_conversation(conv, user_conv_dir)
         yield _sse_event('done', {'conversation_id': conv_id})
 
     return Response(
