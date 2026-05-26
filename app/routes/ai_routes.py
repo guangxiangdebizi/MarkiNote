@@ -4,16 +4,15 @@ import json
 import uuid
 from datetime import datetime
 from flask import Blueprint, Response, request, jsonify, current_app
-from app.auth import active_library_dir, backups_dir, conversations_dir, current_user, login_required_response, require_login, user_root, ensure_user_workspace
+from app.auth import active_library_dir, backups_dir, current_user, login_required_response, require_login, user_root, ensure_user_workspace
 from app.utils.ai_provider import stream_chat_completion, get_providers_info, validate_api_key, resolve_api_key, PROVIDERS
 from app.utils.ai_tools import TOOL_DEFINITIONS, SYSTEM_PROMPT, execute_tool, get_system_prompt, get_all_tool_definitions, execute_mcp_tool
 from app.utils.ai_backup import BackupManager
+from app.utils import ai_db
 import requests as http_requests
 
 ai_bp = Blueprint('ai', __name__)
 
-CONVERSATIONS_DIR = '.ai_conversations'
-BACKUPS_DIR = '.ai_backups'
 MAX_TOOL_ITERATIONS = 15
 
 
@@ -25,46 +24,36 @@ def _safe_library_path(base_path, rel_path):
     return full_path
 
 
-def _get_backup_manager(lib_dir=None, backup_dir=None):
+def _get_backup_manager(lib_dir=None, backup_dir=None, user_id=None):
+    if user_id is None:
+        user = current_user()
+        user_id = user['id'] if user else None
     if lib_dir is None:
         lib_dir = active_library_dir(require_login=True)
     if backup_dir is None:
         backup_dir = backups_dir()
-    if not lib_dir or not backup_dir:
+    if not user_id or not lib_dir or not backup_dir:
         return None
-    return BackupManager(backup_dir, lib_dir)
+    return BackupManager(backup_dir, lib_dir, user_id)
 
 
-def _conversations_dir(explicit_dir=None):
-    if explicit_dir:
-        os.makedirs(explicit_dir, exist_ok=True)
-        return explicit_dir
-    cdir = conversations_dir()
-    if not cdir:
+def _current_user_id():
+    user = current_user()
+    return user['id'] if user else None
+
+
+def _load_conversation(conv_id, user_id=None):
+    user_id = user_id or _current_user_id()
+    if not user_id:
         return None
-    os.makedirs(cdir, exist_ok=True)
-    return cdir
+    return ai_db.load_conversation(user_id, conv_id)
 
 
-def _load_conversation(conv_id, conv_dir=None):
-    conv_dir = _conversations_dir(conv_dir)
-    if not conv_dir:
-        return None
-    path = os.path.join(conv_dir, f'{conv_id}.json')
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return None
-
-
-def _save_conversation(conv, conv_dir=None):
-    conv_dir = _conversations_dir(conv_dir)
-    if not conv_dir:
+def _save_conversation(conv, user_id=None):
+    user_id = user_id or _current_user_id()
+    if not user_id:
         return
-    path = os.path.join(conv_dir, f'{conv["id"]}.json')
-    conv['updated_at'] = datetime.now().isoformat()
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(conv, f, ensure_ascii=False, indent=2)
+    ai_db.save_conversation(user_id, conv)
 
 
 def _resolve_user_paths():
@@ -75,7 +64,7 @@ def _resolve_user_paths():
     ensure_user_workspace(user['id'])
     root = user_root(user['id'])
     return (
-        os.path.join(root, 'conversations'),
+        user['id'],
         os.path.join(root, 'library'),
         os.path.join(root, 'backups'),
         user['id'],
@@ -173,51 +162,39 @@ def validate_key():
 @ai_bp.route('/api/ai/conversations', methods=['GET'])
 @require_login
 def list_conversations():
-    conv_dir = _conversations_dir()
-    convs = []
-    for fname in os.listdir(conv_dir):
-        if not fname.endswith('.json'):
-            continue
-        try:
-            with open(os.path.join(conv_dir, fname), 'r', encoding='utf-8') as f:
-                c = json.load(f)
-            convs.append({
-                'id': c['id'],
-                'title': c.get('title', '新对话'),
-                'created_at': c.get('created_at', ''),
-                'updated_at': c.get('updated_at', ''),
-                'message_count': len([m for m in c.get('messages', []) if m['role'] in ('user', 'assistant')])
-            })
-        except Exception:
-            continue
-    convs.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+    user_id = _current_user_id()
+    if not user_id:
+        return login_required_response()
+    convs = ai_db.list_conversations(user_id)
     return jsonify({'success': True, 'conversations': convs})
 
 
 @ai_bp.route('/api/ai/conversations/<conv_id>', methods=['GET', 'DELETE', 'PATCH'])
 @require_login
 def manage_conversation(conv_id):
+    user_id = _current_user_id()
+    if not user_id:
+        return login_required_response()
+
     if request.method == 'DELETE':
-        path = os.path.join(_conversations_dir(), f'{conv_id}.json')
-        if os.path.exists(path):
-            bm = _get_backup_manager()
+        if ai_db.delete_conversation(user_id, conv_id):
+            bm = _get_backup_manager(user_id=user_id)
             removed_count = bm.delete_conversation_backups(conv_id) if bm else 0
-            os.remove(path)
             return jsonify({'success': True, 'backups_removed': removed_count})
         return jsonify({'error': '对话不存在'}), 404
 
     if request.method == 'PATCH':
         data = request.get_json()
-        conv = _load_conversation(conv_id)
+        conv = _load_conversation(conv_id, user_id)
         if not conv:
             return jsonify({'error': '对话不存在'}), 404
         new_title = data.get('title', '').strip()
         if new_title:
+            ai_db.update_conversation_title(user_id, conv_id, new_title)
             conv['title'] = new_title[:50]
-            _save_conversation(conv)
         return jsonify({'success': True, 'title': conv['title']})
 
-    conv = _load_conversation(conv_id)
+    conv = _load_conversation(conv_id, user_id)
     if not conv:
         return jsonify({'error': '对话不存在'}), 404
 
@@ -260,8 +237,9 @@ def chat():
         return jsonify({'error': '请先设置 API Key'}), 400
 
     conv = None
+    user_id = _current_user_id()
     if conv_id:
-        conv = _load_conversation(conv_id)
+        conv = _load_conversation(conv_id, user_id)
     if not conv:
         conv_id = uuid.uuid4().hex[:12]
         conv = {
@@ -291,13 +269,13 @@ def chat():
 
     conv['messages'].append({'role': 'user', 'content': actual_user_content})
 
-    user_conv_dir, lib_dir, backup_dir, _user_id = _resolve_user_paths()
-    if not user_conv_dir or not lib_dir or not backup_dir:
+    user_id, lib_dir, backup_dir, _ = _resolve_user_paths()
+    if not user_id or not lib_dir or not backup_dir:
         return login_required_response()
 
-    _save_conversation(conv, user_conv_dir)
+    _save_conversation(conv, user_id)
 
-    bm = _get_backup_manager(lib_dir, backup_dir)
+    bm = _get_backup_manager(lib_dir, backup_dir, user_id)
     if not bm:
         return login_required_response()
 
@@ -346,7 +324,7 @@ def chat():
                         tool_calls_map[idx]['function']['arguments'] += event['arguments']
                 elif etype == 'error':
                     yield _sse_event('error', {'message': event['message']})
-                    _save_conversation(conv, user_conv_dir)
+                    _save_conversation(conv, user_id)
                     return
                 elif etype in ('done', 'tool_calls_complete'):
                     break
@@ -418,7 +396,7 @@ def chat():
                     'content': context_result
                 })
 
-            _save_conversation(conv, user_conv_dir)
+            _save_conversation(conv, user_id)
 
         if backup_group_id:
             bm.cleanup()
@@ -430,7 +408,7 @@ def chat():
                 conv['title'] = title
                 yield _sse_event('title_generated', {'title': title})
 
-        _save_conversation(conv, user_conv_dir)
+        _save_conversation(conv, user_id)
         yield _sse_event('done', {'conversation_id': conv_id})
 
     return Response(
@@ -452,7 +430,7 @@ def save_partial(conv_id):
     partial_content = data.get('content', '')
     partial_reasoning = data.get('reasoning', '')
 
-    conv = _load_conversation(conv_id)
+    conv = _load_conversation(conv_id, _current_user_id())
     if not conv:
         return jsonify({'error': '对话不存在'}), 404
 
@@ -470,7 +448,7 @@ def save_partial(conv_id):
             asst_msg['_reasoning'] = partial_reasoning
         conv['messages'].append(asst_msg)
 
-    _save_conversation(conv)
+    _save_conversation(conv, _current_user_id())
     return jsonify({'success': True})
 
 
@@ -485,7 +463,7 @@ def truncate_conversation(conv_id):
     if user_msg_number is None:
         return jsonify({'error': '缺少 user_msg_number 参数'}), 400
 
-    conv = _load_conversation(conv_id)
+    conv = _load_conversation(conv_id, _current_user_id())
     if not conv:
         return jsonify({'error': '对话不存在'}), 404
 
@@ -521,7 +499,7 @@ def truncate_conversation(conv_id):
         rollback_results.append({'group_id': gid, 'success': ok, 'message': msg_text})
 
     conv['messages'] = messages[:truncate_at]
-    _save_conversation(conv)
+    _save_conversation(conv, _current_user_id())
 
     return jsonify({
         'success': True,

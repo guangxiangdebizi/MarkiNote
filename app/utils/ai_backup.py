@@ -1,15 +1,17 @@
-"""AI 备份与回滚管理"""
+"""AI 备份与回滚管理（元数据存 SQLite，文件快照存磁盘）。"""
 import os
-import json
 import shutil
 import uuid
 from datetime import datetime
 
+from app.utils import ai_db
+
 
 class BackupManager:
-    def __init__(self, backup_dir, library_dir):
+    def __init__(self, backup_dir, library_dir, user_id):
         self.backup_dir = backup_dir
         self.library_dir = library_dir
+        self.user_id = user_id
         os.makedirs(backup_dir, exist_ok=True)
 
     def _validate_path(self, rel_path):
@@ -23,18 +25,16 @@ class BackupManager:
         group_dir = os.path.join(self.backup_dir, group_id)
         os.makedirs(os.path.join(group_dir, 'before'), exist_ok=True)
         os.makedirs(os.path.join(group_dir, 'after'), exist_ok=True)
-        manifest = {
-            'id': group_id,
-            'timestamp': datetime.now().isoformat(),
-            'conversation_id': conversation_id,
-            'operations': []
-        }
-        self._save_manifest(group_dir, manifest)
+        ai_db.create_backup_group(self.user_id, group_id, conversation_id)
         return group_id
 
     def backup_before_modify(self, group_id, operation_type, rel_path, description=''):
         group_dir = os.path.join(self.backup_dir, group_id)
-        manifest = self._load_manifest(group_dir)
+        manifest = ai_db.load_backup_manifest(group_id)
+        if not manifest:
+            ai_db.create_backup_group(self.user_id, group_id)
+            manifest = ai_db.load_backup_manifest(group_id) or {'operations': []}
+
         full_path = os.path.join(self.library_dir, rel_path)
         has_backup = False
 
@@ -58,8 +58,7 @@ class BackupManager:
             'has_backup': has_backup,
             'timestamp': datetime.now().isoformat()
         }
-        manifest['operations'].append(op)
-        self._save_manifest(group_dir, manifest)
+        ai_db.append_backup_operation(group_id, op)
         return op['index']
 
     def backup_after_modify(self, group_id, rel_path):
@@ -80,7 +79,10 @@ class BackupManager:
         if not os.path.exists(group_dir):
             return False, '备份不存在'
 
-        manifest = self._load_manifest(group_dir)
+        manifest = ai_db.load_backup_manifest(group_id)
+        if not manifest:
+            return False, '备份不存在'
+
         ops = manifest['operations']
         if operation_index is not None:
             ops = [op for op in ops if op['index'] == operation_index]
@@ -113,59 +115,23 @@ class BackupManager:
         return True, '回滚成功'
 
     def list_backups(self, limit=50):
-        if not os.path.exists(self.backup_dir):
-            return []
-        groups = []
-        for name in sorted(os.listdir(self.backup_dir), reverse=True)[:limit]:
-            group_dir = os.path.join(self.backup_dir, name)
-            if not os.path.isdir(group_dir):
-                continue
-            manifest_path = os.path.join(group_dir, 'manifest.json')
-            if os.path.exists(manifest_path):
-                try:
-                    with open(manifest_path, 'r', encoding='utf-8') as f:
-                        manifest = json.load(f)
-                    groups.append(manifest)
-                except Exception:
-                    continue
-        return groups
+        return ai_db.list_backup_groups(self.user_id, limit)
 
     def delete_conversation_backups(self, conversation_id):
-        """删除指定对话关联的所有备份"""
-        if not os.path.exists(self.backup_dir) or not conversation_id:
+        if not conversation_id:
             return 0
+        group_ids = ai_db.delete_backup_groups_for_conversation(self.user_id, conversation_id)
         removed = 0
-        for name in os.listdir(self.backup_dir):
-            group_dir = os.path.join(self.backup_dir, name)
-            if not os.path.isdir(group_dir):
-                continue
-            manifest_path = os.path.join(group_dir, 'manifest.json')
-            if not os.path.exists(manifest_path):
-                continue
-            try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
-                    manifest = json.load(f)
-                if manifest.get('conversation_id') == conversation_id:
-                    shutil.rmtree(group_dir, ignore_errors=True)
-                    removed += 1
-            except Exception:
-                continue
+        for group_id in group_ids:
+            group_dir = os.path.join(self.backup_dir, group_id)
+            if os.path.isdir(group_dir):
+                shutil.rmtree(group_dir, ignore_errors=True)
+                removed += 1
         return removed
 
     def cleanup(self, max_count=100):
-        if not os.path.exists(self.backup_dir):
-            return
-        dirs = sorted(os.listdir(self.backup_dir))
-        while len(dirs) > max_count:
-            old = dirs.pop(0)
-            old_path = os.path.join(self.backup_dir, old)
-            if os.path.isdir(old_path):
-                shutil.rmtree(old_path, ignore_errors=True)
-
-    def _save_manifest(self, group_dir, manifest):
-        with open(os.path.join(group_dir, 'manifest.json'), 'w', encoding='utf-8') as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-
-    def _load_manifest(self, group_dir):
-        with open(os.path.join(group_dir, 'manifest.json'), 'r', encoding='utf-8') as f:
-            return json.load(f)
+        remove_ids = ai_db.cleanup_old_backup_groups(self.user_id, max_count)
+        for group_id in remove_ids:
+            group_dir = os.path.join(self.backup_dir, group_id)
+            if os.path.isdir(group_dir):
+                shutil.rmtree(group_dir, ignore_errors=True)

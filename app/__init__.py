@@ -25,4 +25,10 @@ def create_app():
     app.register_blueprint(ai_bp)
     app.register_blueprint(auth_bp)
     
+    # 初始化 AI 数据库存储，并迁移历史 JSON 对话
+    from app.utils.ai_db import init_ai_storage, migrate_legacy_json_storage
+    with app.app_context():
+        init_ai_storage()
+        migrate_legacy_json_storage()
+    
     return app

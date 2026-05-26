@@ -290,7 +290,6 @@ def ensure_user_workspace(user_id: str) -> None:
         if os.path.isfile(src) and not os.path.exists(dst):
             shutil.copy2(src, dst)
 
-    os.makedirs(os.path.join(root, "conversations"), exist_ok=True)
     os.makedirs(os.path.join(root, "backups"), exist_ok=True)
 
 
@@ -305,11 +304,8 @@ def active_library_dir(require_login: bool = False) -> Optional[str]:
 
 
 def conversations_dir() -> Optional[str]:
-    user = current_user()
-    if not user:
-        return None
-    ensure_user_workspace(user["id"])
-    return os.path.join(user_root(user["id"]), "conversations")
+    """已弃用：对话改存 SQLite（markinote.sqlite3）。"""
+    return None
 
 
 def backups_dir() -> Optional[str]:
